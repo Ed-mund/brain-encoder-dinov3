@@ -129,7 +129,8 @@ cd "${DINO3_DIR}"
 python train.py \
     --data_root "${DATA_ROOT}" \
     --output_dir "${OUTPUT_DIR}" \
-    --subjects subj01 subj02 subj03 subj04 subj05 subj06 subj07 \
+    --subjects subj01 subj02 subj03 subj04 subj05 subj06 subj07 subj08 \
+    --proper_test_split \
     --epochs "${EPOCHS}" \
     --batch_size 32 \
     --lr 1e-3 \

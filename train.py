@@ -686,9 +686,57 @@ def main(args):
     # Load datasets
     # -----------------------------------------------------------------------
     train_datasets = {}
-    test_datasets = {}
+    test_datasets  = {}
 
     for sid in args.subjects:
+        if args.proper_test_split:
+            # --- Paper-matching evaluation protocol ---
+            # Train on the full training split (all unique images per subject).
+            # Evaluate on the dedicated test_split, which contains the NSD shared
+            # images (the same evaluation set used in Beliy et al. 2025).
+            # This gives ~10% more training data and a proper cross-subject eval.
+            train_ds = NSDAlgonautsDataset(
+                data_root=args.data_root,
+                subject_id=sid,
+                split="train",
+                transform=img_transform,
+            )
+            test_ds = NSDAlgonautsDataset(
+                data_root=args.data_root,
+                subject_id=sid,
+                split="test",
+                transform=img_transform,
+            )
+            if test_ds.fmri_data is None:
+                logger.warning(
+                    f"[{sid}] --proper_test_split requested but test fMRI not found; "
+                    "falling back to random holdout."
+                )
+                # Fallback: treat test_ds as unusable, use holdout instead
+                args.proper_test_split = False
+
+            if args.proper_test_split:
+                if args.data_fraction < 1.0:
+                    n_subset = max(int(len(train_ds) * args.data_fraction), 1)
+                    train_ds = Subset(train_ds, list(range(n_subset)))
+                    train_ds.num_voxels = test_ds.num_voxels
+                    train_ds.subject_id = sid
+                    logger.info(f"  [{sid}] data_fraction={args.data_fraction:.0%} → "
+                                f"using {n_subset}/{len(train_ds)} training samples")
+
+                train_datasets[sid] = train_ds
+                train_datasets[sid].num_voxels = train_ds.num_voxels if hasattr(train_ds, 'num_voxels') else test_ds.num_voxels
+                train_datasets[sid].subject_id = sid
+                test_datasets[sid]  = test_ds
+                test_datasets[sid].num_voxels = test_ds.num_voxels
+                logger.info(
+                    f"[{sid}] proper_test_split: {len(train_ds)} train, "
+                    f"{len(test_ds)} test images, {test_ds.num_voxels} voxels"
+                )
+                continue  # skip the holdout branch below
+
+        # --- Holdout evaluation (default fallback) ---
+        # Hold out test_ratio of the training data for evaluation.
         full_ds = NSDAlgonautsDataset(
             data_root=args.data_root,
             subject_id=sid,
@@ -696,7 +744,6 @@ def main(args):
             transform=img_transform,
         )
 
-        # Create train/test split (hold out 10% for evaluation)
         n = len(full_ds)
         n_test = max(int(n * args.test_ratio), 1)
         n_train = n - n_test
@@ -706,7 +753,6 @@ def main(args):
         train_idx = perm[:n_train].tolist()
         test_idx  = perm[n_train:].tolist()
 
-        # Optionally subsample training data (transfer learning experiments)
         if args.data_fraction < 1.0:
             n_subset = max(int(n_train * args.data_fraction), 1)
             train_idx = train_idx[:n_subset]
@@ -1125,7 +1171,16 @@ def parse_args():
                         help="Path to Algonauts 2023 data or NSD root")
     parser.add_argument("--subjects", type=str, nargs="+", required=True,
                         help="Subject IDs (e.g., subj01 subj02 ...)")
-    parser.add_argument("--test_ratio", type=float, default=0.1)
+    parser.add_argument("--test_ratio", type=float, default=0.1,
+                        help="Fraction of training data held out for evaluation "
+                             "(only used when --proper_test_split is not set).")
+    parser.add_argument("--proper_test_split", action="store_true", default=True,
+                        help="Use the dedicated test_split/ (NSD shared images with fMRI) "
+                             "for evaluation instead of a random holdout. Trains on ALL "
+                             "training images. Matches the paper's evaluation protocol.")
+    parser.add_argument("--no_proper_test_split", dest="proper_test_split",
+                        action="store_false",
+                        help="Disable proper_test_split and fall back to random holdout.")
     parser.add_argument("--data_fraction", type=float, default=1.0,
                         help="Fraction of training data to use (e.g. 0.2 = 20%%). "
                              "Applied after train/test split.")
