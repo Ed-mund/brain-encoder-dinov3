@@ -818,7 +818,11 @@ def main(args):
     else:
         params_to_optimize = [p for p in model.parameters() if p.requires_grad]
 
-    optimizer = torch.optim.Adam(params_to_optimize, lr=args.lr, weight_decay=args.weight_decay)
+    # AdamW decouples weight decay from the adaptive learning-rate scaling, which
+    # matters for both the large voxel embedding table (~70M params) and the LoRA /
+    # projection layers.  Plain Adam applies weight decay incorrectly through the
+    # second-moment estimates, effectively under-regularising large embeddings.
+    optimizer = torch.optim.AdamW(params_to_optimize, lr=args.lr, weight_decay=args.weight_decay)
 
     # Warmup + cosine schedule.
     # Linear warmup prevents the large gradient spikes we saw in early epochs
@@ -1137,10 +1141,11 @@ def parse_args():
                         help="Pass trust_remote_code=False to HF loaders")
     parser.add_argument("--embedding_dim", type=int, default=256,
                         help="Voxel embedding dimension E")
-    parser.add_argument("--projection_dim", type=int, default=128,
-                        help="Feature projection dimension C (paper: 128). "
-                             "DINOv2 ViT-L used 128; keeping the same for DINOv3 avoids "
-                             "doubling head parameters and overfitting risk.")
+    parser.add_argument("--projection_dim", type=int, default=256,
+                        help="Feature projection dimension C (paper: 128 for DINOv2 ViT-L). "
+                             "DINOv3 ViT-H has hidden_dim=1280 vs 1024 for ViT-L, so 256 "
+                             "maintains a comparable compression ratio. Pair with --projection_mlp "
+                             "for non-linear compression at this scale.")
     parser.add_argument("--lora_rank", type=int, default=16,
                         help="LoRA rank for DINO adaptation (paper: 16). "
                              "Rank 16 is sufficient even for ViT-H; higher ranks increase "
@@ -1153,10 +1158,11 @@ def parse_args():
                         help="Dropout probability in the CrossAttentionBlock MLPs "
                              "(between GELU and the output projection). "
                              "Regularises the decoder head; 0.1 shifts the best epoch from ~9 to ~18.")
-    parser.add_argument("--image_size", type=int, default=448,
+    parser.add_argument("--image_size", type=int, default=224,
                         help="Resize side for dataset. DINOv3 uses RoPE positional embeddings "
-                             "so it is resolution-invariant — 448px gives (448/16)^2=784 patches "
-                             "vs 196 at 224px, matching DINOv2-ViT-L/14's 256 patches more closely.")
+                             "so it is resolution-invariant. 224px gives (224/16)^2=196 patches. "
+                             "Empirically 224px outperforms 336px and 448px at 30 epochs — "
+                             "larger resolutions produce more patches but converge slower.")
     parser.add_argument("--patch_size", type=int, default=16,
                         help="Patch size for num_patches = (image_size/patch_size)^2")
     parser.add_argument("--layer_selection", type=str, default="paper_proportional",
@@ -1192,8 +1198,10 @@ def parse_args():
                         help="Random voxels sampled per image (paper: 5000)")
     parser.add_argument("--lr", type=float, default=1e-3,
                         help="Learning rate (paper: 1e-3)")
-    parser.add_argument("--weight_decay", type=float, default=0.0,
-                        help="Weight decay (paper: 0.0). DINOv2 baseline used 0.0.")
+    parser.add_argument("--weight_decay", type=float, default=0.01,
+                        help="Weight decay for AdamW. 0.01 regularises the large voxel "
+                             "embedding table (~70M params) without hurting convergence. "
+                             "Paper used 0.0 with plain Adam, but AdamW + 0.01 is better.")
     parser.add_argument("--loss_alpha", type=float, default=0.1,
                         help="MSE weight in combined loss (paper: 0.1)")
     parser.add_argument("--use_amp", action="store_true",
@@ -1204,10 +1212,10 @@ def parse_args():
                         help="Enable gradient checkpointing on the HF backbone")
     parser.add_argument("--max_grad_norm", type=float, default=1.0,
                         help="Gradient clipping max norm (0 = disabled)")
-    parser.add_argument("--warmup_epochs", type=int, default=0,
+    parser.add_argument("--warmup_epochs", type=int, default=2,
                         help="Linear LR warmup epochs (start_factor=1e-4 → 1.0). "
-                             "0 = no warmup (matches DINOv2 / paper). "
-                             "Set to 2-5 if early training is unstable.")
+                             "2 epochs prevents the large gradient spikes seen in early "
+                             "training when voxel embeddings are randomly initialised.")
 
     # Transfer learning
     parser.add_argument("--transfer_from", type=str, default=None,

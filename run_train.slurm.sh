@@ -133,14 +133,15 @@ python train.py \
     --epochs "${EPOCHS}" \
     --batch_size 32 \
     --lr 1e-3 \
-    --weight_decay 0.0 \
+    --weight_decay 0.01 \
     --warmup_epochs 2 \
-    --image_size 448 \
+    --image_size 224 \
     --patch_size 16 \
     --layer_selection paper_proportional \
     --lora_rank 16 \
+    --lora_dropout 0.05 \
     --lora_mode block \
-    --projection_dim 192 \
+    --projection_dim 256 \
     --projection_mlp \
     --use_bf16 \
     --gradient_checkpointing \
