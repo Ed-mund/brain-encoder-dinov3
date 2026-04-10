@@ -1,0 +1,40 @@
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+.eggs/
+*.so
+*.dylib
+
+# Wandb
+wandb/
+wandb_data/
+
+# Model checkpoints / outputs
+outputs/
+checkpoints/
+*.pt
+*.pth
+*.ckpt
+
+# Jupyter
+.ipynb_checkpoints/
+*.ipynb
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Logs (large SLURM outputs live in .logs/, not here)
+*.log
+*.out
+*.err
+
+# HuggingFace cache
+.cache/
