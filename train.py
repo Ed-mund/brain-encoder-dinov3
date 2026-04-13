@@ -852,23 +852,39 @@ def main(args):
     # -----------------------------------------------------------------------
     if args.freeze_shared:
         # Transfer learning: only optimize voxel embeddings
-        params_to_optimize = []
         for name, param in model.named_parameters():
             if "voxel_store" in name:
                 param.requires_grad = True
-                params_to_optimize.append(param)
             else:
                 param.requires_grad = False
-        logger.info(f"Transfer learning: optimizing {len(params_to_optimize)} "
-                     "voxel embedding parameters only")
-    else:
-        params_to_optimize = [p for p in model.parameters() if p.requires_grad]
+        logger.info("Transfer learning: optimizing voxel embedding parameters only")
 
-    # AdamW decouples weight decay from the adaptive learning-rate scaling, which
-    # matters for both the large voxel embedding table (~70M params) and the LoRA /
-    # projection layers.  Plain Adam applies weight decay incorrectly through the
-    # second-moment estimates, effectively under-regularising large embeddings.
-    optimizer = torch.optim.AdamW(params_to_optimize, lr=args.lr, weight_decay=args.weight_decay)
+    # AdamW with separate parameter groups:
+    #   - Voxel embeddings (lookup table, ~70M params): weight_decay=0 — these are
+    #     pure learned representations; decaying them toward zero destroys the
+    #     per-voxel functionality the model is trying to capture (the paper uses 0).
+    #   - Everything else (LoRA, projections, cross-attention): weight_decay as set —
+    #     regularises the shared network weights without harming voxel quality.
+    voxel_params, other_params = [], []
+    for name, param in model.named_parameters():
+        if not param.requires_grad:
+            continue
+        if "voxel_store" in name:
+            voxel_params.append(param)
+        else:
+            other_params.append(param)
+
+    param_groups = [
+        {"params": voxel_params, "weight_decay": 0.0,            "name": "voxel_embeddings"},
+        {"params": other_params, "weight_decay": args.weight_decay, "name": "shared_network"},
+    ]
+    n_voxel  = sum(p.numel() for p in voxel_params)
+    n_other  = sum(p.numel() for p in other_params)
+    logger.info(
+        f"Optimizer groups — voxel_embeddings: {n_voxel:,} params (wd=0.0)  |  "
+        f"shared_network: {n_other:,} params (wd={args.weight_decay})"
+    )
+    optimizer = torch.optim.AdamW(param_groups, lr=args.lr)
 
     # Warmup + cosine schedule.
     # Linear warmup prevents the large gradient spikes we saw in early epochs

@@ -4,9 +4,9 @@
 # ============================================================================
 #
 # Usage:
-#   sbatch run_train.slurm.sh                          # fresh 30-epoch run
+#   sbatch run_train.slurm.sh                          # fresh 50-epoch run (8 subj, proper test split)
 #   sbatch run_train.slurm.sh --resume                 # resume latest checkpoint
-#   sbatch run_train.slurm.sh --run_name my_exp --epochs 50
+#   sbatch run_train.slurm.sh --run_name my_exp --epochs 60
 #
 # All unknown flags are forwarded verbatim to train.py.
 #
@@ -82,7 +82,7 @@ echo "Output dir:       ${OUTPUT_DIR}"
 RESUME_FLAG=""
 EXTRA_ARGS=()
 RUN_NAME=""
-EPOCHS=30
+EPOCHS=50
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -104,8 +104,9 @@ if [[ -n "${RESUME_FLAG}" && -z "${RUN_NAME}" ]]; then
     fi
 fi
 
-RUN_NAME_ARG=""
-[[ -n "${RUN_NAME}" ]] && RUN_NAME_ARG="--wandb_run_name ${RUN_NAME}"
+# Default run name — override with --run_name on the command line
+[[ -z "${RUN_NAME}" ]] && RUN_NAME="dinov3_v7_fixwd_8subj_e50"
+RUN_NAME_ARG="--wandb_run_name ${RUN_NAME}"
 
 echo "Extra args:       ${EXTRA_ARGS[*]+"${EXTRA_ARGS[*]}"}"
 echo ""
